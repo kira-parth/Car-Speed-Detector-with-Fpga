@@ -1,0 +1,141 @@
+car speed 
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 02.12.2024 19:05:35
+// Design Name: 
+// Module Name: carspeeddetector
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module SpeedDisplaySystem (
+    input clk,                 // System clock
+    input ir_sensor1,          // First IR sensor signal (trigger on pass through)
+    input ir_sensor2,          // Second IR sensor signal (trigger on pass through)
+    output reg [6:0] abcdefg,  // Seven-segment display segments
+    output reg [7:0] an,       // Seven-segment display enable
+    output reg [2:0] rgb       // RGB LED outputs (Red, Green, Blue)
+);
+
+    // Timing registers for capturing the time difference between IR sensors
+    reg [31:0] timer;          // Clock cycle counter for time calculation
+    reg [31:0] time1, time2;   // Time stamps for IR sensor activations
+    reg [31:0] time_diff;      // Time difference between the two sensors
+    reg [31:0] speed_reg;      // Speed calculated in cm per clock cycle
+    reg [3:0] digit;           // Current digit to display on seven-segment
+    reg [2:0] active_digit = 0; // Index for multiplexing 7-segment displays
+    reg [15:0] refresh_counter = 0; // Refresh counter for multiplexing
+    reg state = 0;             // 0 = waiting for sensor 1, 1 = waiting for sensor 2
+
+    // Fixed distance between the two sensors (in cm)
+    parameter DISTANCE_CM = 10;
+
+    // System clock counter to measure time (in clock cycles)
+    always @(posedge clk) begin
+        timer <= timer + 1; // Increment clock cycle counter
+    end
+
+    // State machine for capturing the time difference between the two sensors
+    always @(posedge clk) begin
+        if (state == 0 && ir_sensor1) begin
+            time1 <= timer;    // Capture the time when the first sensor is triggered
+            state <= 1;         // Transition to wait for second sensor
+        end
+        if (state == 1 && ir_sensor2) begin
+            time2 <= timer;    // Capture the time when the second sensor is triggered
+            state <= 0;         // Reset the state to wait for the first sensor again
+        end
+    end
+
+    // Calculate speed when both sensors are triggered
+    always @(posedge clk) begin
+        if (state == 0 && ir_sensor2 && (time2 > time1)) begin
+            time_diff <= time2 - time1;        // Time difference in clock cycles
+            speed_reg <= (DISTANCE_CM * 100) / time_diff;  // Speed in cm per clock cycle
+        end
+    end
+
+    // RGB LED control based on speed value
+    always @(posedge clk) begin
+        if (speed_reg > 50)      // High speed: Red
+            rgb <= 3'b100;
+        else if (speed_reg < 20
+) // Low speed: Green
+            rgb <= 3'b010;
+        else                      // Medium speed: Blue
+            rgb <= 3'b001;
+    end
+
+    // Seven-segment display decoder (for displaying digits)
+    always @(*) begin
+        case (digit)
+            4'b0000: abcdefg = 7'b1000000; // 0
+            4'b0001: abcdefg = 7'b1111001; // 1
+            4'b0010: abcdefg = 7'b0100100; // 2
+            4'b0011: abcdefg = 7'b0110000; // 3
+            4'b0100: abcdefg = 7'b0011001; // 4
+            4'b0101: abcdefg = 7'b0010010; // 5
+            4'b0110: abcdefg = 7'b0000010; // 6
+            4'b0111: abcdefg = 7'b1111000; // 7
+            4'b1000: abcdefg = 7'b0000000; // 8
+            4'b1001: abcdefg = 7'b0010000; // 9
+            default: abcdefg = 7'b1111111; // Blank
+        endcase
+    end
+
+    // Multiplexing logic for 7-digit display
+    always @(posedge clk) begin
+        refresh_counter <= refresh_counter + 1;
+        if (refresh_counter == 16'd5000) begin // Adjust refresh rate for multiplexing
+            refresh_counter <= 0;
+            active_digit <= active_digit + 1;
+            if (active_digit == 7) // Reset to 0 after 7 digits
+                active_digit <= 0;
+
+            // Select active digit and enable corresponding display
+            case (active_digit)
+                0: begin
+                    digit <= (speed_reg / 100000) % 10; // Display the highest place
+                    an <= 8'b11111110; // Enable display 0
+                end
+                1: begin
+                    digit <= (speed_reg / 10000) % 10;  // Display next place
+                    an <= 8'b11111101; // Enable display 1
+                end
+                2: begin
+                    digit <= (speed_reg / 1000) % 10;   // Display next place
+                    an <= 8'b11111011; // Enable display 2
+                end
+                3: begin
+                    digit <= (speed_reg / 100) % 10;    // Display next place
+                    an <= 8'b11110111; // Enable display 3
+                end
+                4: begin
+                    digit <= (speed_reg / 10) % 10;     // Display next place
+                    an <= 8'b11101111; // Enable display 4
+                end
+                5: begin
+                    digit <= speed_reg % 10;            // Display least significant digit
+                    an <= 8'b11011111; // Enable display 5
+                end
+                default: begin
+                    digit <= 4'b0000;
+                    an <= 8'b11111111; // Disable all displays
+                end
+            endcase
+        end
+    end
+endmodule
